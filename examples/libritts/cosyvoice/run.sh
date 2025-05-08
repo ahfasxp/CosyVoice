@@ -2,6 +2,17 @@
 # Copyright 2024 Alibaba Inc. All Rights Reserved.
 . ./path.sh || exit 1;
 
+# --- Custom Single-Speaker Data Configuration ---
+# Set these paths to your raw custom data directories.
+# These directories should contain a 'wavs/' subdirectory and a 'transcripts.txt' file.
+custom_raw_train_data_dir="data/myvoice_train"  # REPLACE THIS with the path to your custom training data
+custom_raw_dev_data_dir="data/myvoice_dev"      # REPLACE THIS with the path to your custom development data (can be same as train if no separate dev set)
+
+# Names to be used for the processed data directories under ./data/
+processed_train_data_name="myvoicespeaker_train"
+processed_dev_data_name="myvoicespeaker_dev"
+# --- End Custom Configuration ---
+
 stage=-1
 stop_stage=3
 
@@ -17,32 +28,37 @@ if [ ${stage} -le -1 ] && [ ${stop_stage} -ge -1 ]; then
 fi
 
 if [ ${stage} -le 0 ] && [ ${stop_stage} -ge 0 ]; then
-  echo "Data preparation, prepare wav.scp/text/utt2spk/spk2utt"
-  for x in train-clean-100 train-clean-360 train-other-500 dev-clean dev-other test-clean test-other; do
-    mkdir -p data/$x
-    python local/prepare_data.py --src_dir $data_dir/LibriTTS/$x --des_dir data/$x
-  done
+  echo "Data preparation for custom single-speaker data"
+  # Prepare custom training data
+  echo "Processing custom training data: $custom_raw_train_data_dir"
+  mkdir -p data/$processed_train_data_name
+  python local/prepare_data.py --src_dir $custom_raw_train_data_dir --des_dir data/$processed_train_data_name
+
+  # Prepare custom development/validation data
+  echo "Processing custom development data: $custom_raw_dev_data_dir"
+  mkdir -p data/$processed_dev_data_name
+  python local/prepare_data.py --src_dir $custom_raw_dev_data_dir --des_dir data/$processed_dev_data_name
 fi
 
 if [ ${stage} -le 1 ] && [ ${stop_stage} -ge 1 ]; then
-  echo "Extract campplus speaker embedding, you will get spk2embedding.pt and utt2embedding.pt in data/$x dir"
-  for x in train-clean-100 train-clean-360 train-other-500 dev-clean dev-other test-clean test-other; do
+  echo "Extract campplus speaker embedding, you will get spk2embedding.pt and utt2embedding.pt in data/\$processed_data_name dir"
+  for x in $processed_train_data_name $processed_dev_data_name; do
     tools/extract_embedding.py --dir data/$x \
       --onnx_path $pretrained_model_dir/campplus.onnx
   done
 fi
 
 if [ ${stage} -le 2 ] && [ ${stop_stage} -ge 2 ]; then
-  echo "Extract discrete speech token, you will get utt2speech_token.pt in data/$x dir"
-  for x in train-clean-100 train-clean-360 train-other-500 dev-clean dev-other test-clean test-other; do
+  echo "Extract discrete speech token, you will get utt2speech_token.pt in data/\$processed_data_name dir"
+  for x in $processed_train_data_name $processed_dev_data_name; do
     tools/extract_speech_token.py --dir data/$x \
       --onnx_path $pretrained_model_dir/speech_tokenizer_v1.onnx
   done
 fi
 
 if [ ${stage} -le 3 ] && [ ${stop_stage} -ge 3 ]; then
-  echo "Prepare required parquet format data, you should have prepared wav.scp/text/utt2spk/spk2utt/utt2embedding.pt/spk2embedding.pt/utt2speech_token.pt"
-  for x in train-clean-100 train-clean-360 train-other-500 dev-clean dev-other test-clean test-other; do
+  echo "Prepare required parquet format data for custom data, you should have prepared wav.scp/text/utt2spk/spk2utt/utt2embedding.pt/spk2embedding.pt/utt2speech_token.pt"
+  for x in $processed_train_data_name $processed_dev_data_name; do
     mkdir -p data/$x/parquet
     tools/make_parquet_list.py --num_utts_per_parquet 1000 \
       --num_processes 10 \
@@ -81,8 +97,8 @@ if [ ${stage} -le 5 ] && [ ${stop_stage} -ge 5 ]; then
   if [ $train_engine == 'deepspeed' ]; then
     echo "Notice deepspeed has its own optimizer config. Modify conf/ds_stage2.json if necessary"
   fi
-  cat data/{train-clean-100,train-clean-360,train-other-500}/parquet/data.list > data/train.data.list
-  cat data/{dev-clean,dev-other}/parquet/data.list > data/dev.data.list
+  cat data/$processed_train_data_name/parquet/data.list > data/train.data.list
+  cat data/$processed_dev_data_name/parquet/data.list > data/dev.data.list
   for model in llm flow hifigan; do
     torchrun --nnodes=1 --nproc_per_node=$num_gpus \
         --rdzv_id=$job_id --rdzv_backend="c10d" --rdzv_endpoint="localhost:1234" \
