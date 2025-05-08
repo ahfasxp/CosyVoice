@@ -103,45 +103,6 @@ def main():
 
     except IOError as e:
         logger.error(f"Error writing output files to {args.des_dir}: {e}")
-            continue
-
-        # Store mappings
-        # Using absolute paths for wav.scp is generally more robust
-        utt2wav[utt_id] = os.path.abspath(wav_path)
-        utt2text[utt_id] = text_content
-        utt2spk[utt_id] = speaker_id
-        spk2utt[speaker_id].append(utt_id)
-
-    # Write output files
-    output_wav_scp = os.path.join(args.des_dir, 'wav.scp')
-    output_text = os.path.join(args.des_dir, 'text')
-    output_utt2spk = os.path.join(args.des_dir, 'utt2spk')
-    output_spk2utt = os.path.join(args.des_dir, 'spk2utt')
-
-    try:
-        with open(output_wav_scp, 'w', encoding='utf-8') as f:
-            for k, v in utt2wav.items():
-                f.write(f'{k} {v}\n')
-        
-        with open(output_text, 'w', encoding='utf-8') as f:
-            for k, v in utt2text.items():
-                f.write(f'{k} {v}\n')
-
-        with open(output_utt2spk, 'w', encoding='utf-8') as f:
-            for k, v in utt2spk.items():
-                f.write(f'{k} {v}\n')
-
-        with open(output_spk2utt, 'w', encoding='utf-8') as f:
-            # There's only one speaker, but this loop is general
-            for spk_id_key, utt_list in spk2utt.items():
-                f.write(f'{spk_id_key} {" ".join(utt_list)}\n')
-        
-        if not utt2wav:
-            logger.warning("No utterances were processed. Please check your data and transcripts.txt.")
-        # The original script didn't print a success message, so we don't either.
-
-    except IOError as e:
-        logger.error(f"Error writing output files to {args.des_dir}: {e}")
         return
     
     return
