@@ -137,7 +137,19 @@ if [ ${stage} -le 6 ] && [ ${stop_stage} -ge 6 ]; then
 fi
 
 if [ ${stage} -le 7 ] && [ ${stop_stage} -ge 7 ]; then
-  echo "Export your model for inference speedup. Remember copy your llm or flow model to model_dir"
-  python cosyvoice/bin/export_jit.py --model_dir $pretrained_model_dir
-  python cosyvoice/bin/export_onnx.py --model_dir $pretrained_model_dir
+  echo "Exporting fine-tuned models for inference speedup."
+  finetuned_exp_dir_base="`pwd`/exp/cosyvoice"
+  finetuned_export_dir="$finetuned_exp_dir_base/exported_finetuned_model"
+  mkdir -p $finetuned_export_dir
+
+  echo "Copying fine-tuned models to $finetuned_export_dir"
+  cp $finetuned_exp_dir_base/llm/$train_engine/llm.pt $finetuned_export_dir/llm.pt
+  cp $finetuned_exp_dir_base/flow/$train_engine/flow.pt $finetuned_export_dir/flow.pt
+  cp $finetuned_exp_dir_base/hifigan/$train_engine/hifigan.pt $finetuned_export_dir/hift.pt
+  
+  echo "Running JIT export using models from $finetuned_export_dir"
+  python cosyvoice/bin/export_jit.py --model_dir $finetuned_export_dir
+  echo "Running ONNX export using models from $finetuned_export_dir"
+  python cosyvoice/bin/export_onnx.py --model_dir $finetuned_export_dir
+  echo "Exported models (JIT/ONNX) are saved in $finetuned_export_dir"
 fi
