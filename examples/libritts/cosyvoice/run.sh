@@ -15,7 +15,7 @@ processed_dev_data_name="myvoicespeaker_dev"
 # --- End Custom Configuration ---
 
 stage=-1
-stop_stage=3
+stop_stage=6
 
 data_url=www.openslr.org/resources/60
 data_dir=/mnt/lyuxiang.lx/data/tts/openslr/libritts
