@@ -22,21 +22,44 @@ import multiprocessing
 import time
 import torch
 
+# Global variables for worker processes, to be initialized by init_worker
+# These will hold the data dictionaries needed by the 'job' function.
+g_utt2wav = None
+g_utt2text = None
+g_utt2spk = None
+g_utt2embedding = None
+g_spk2embedding = None
+g_utt2speech_token = None
+
+def init_worker(utt2wav_data, utt2text_data, utt2spk_data, utt2embedding_data, spk2embedding_data, utt2speech_token_data):
+    """
+    Initializes global variables for each worker process.
+    This function is called by multiprocessing.Pool when each worker process starts.
+    """
+    global g_utt2wav, g_utt2text, g_utt2spk, g_utt2embedding, g_spk2embedding, g_utt2speech_token
+    g_utt2wav = utt2wav_data
+    g_utt2text = utt2text_data
+    g_utt2spk = utt2spk_data
+    g_utt2embedding = utt2embedding_data
+    g_spk2embedding = spk2embedding_data
+    g_utt2speech_token = utt2speech_token_data
+
 
 def job(utt_list, parquet_file, utt2parquet_file, spk2parquet_file):
     start_time = time.time()
     data_list = []
     for utt in tqdm(utt_list):
-        data = open(utt2wav[utt], 'rb').read()
+        data = open(g_utt2wav[utt], 'rb').read()  # Use global g_utt2wav
         data_list.append(data)
-    wav_list = [utt2wav[utt] for utt in utt_list]
-    text_list = [utt2text[utt] for utt in utt_list]
-    spk_list = [utt2spk[utt] for utt in utt_list]
-    uttembedding_list = [utt2embedding[utt] for utt in utt_list]
-    spkembedding_list = [spk2embedding[utt2spk[utt]] for utt in utt_list]
-    speech_token_list = [utt2speech_token[utt] for utt in utt_list]
+    wav_list = [g_utt2wav[utt] for utt in utt_list]  # Use global g_utt2wav
+    text_list = [g_utt2text[utt] for utt in utt_list]  # Use global g_utt2text
+    spk_list = [g_utt2spk[utt] for utt in utt_list]  # Use global g_utt2spk
+    uttembedding_list = [g_utt2embedding[utt] for utt in utt_list]  # Use global g_utt2embedding
+    spkembedding_list = [g_spk2embedding[g_utt2spk[utt]] for utt in utt_list]  # Use global g_spk2embedding and g_utt2spk
+    speech_token_list = [g_utt2speech_token[utt] for utt in utt_list]  # Use global g_utt2speech_token
 
-    # 保存到parquet,utt2parquet_file,spk2parquet_file
+    # Save to parquet, utt2parquet_file, spk2parquet_file (Original comment in Chinese, kept for context if needed by user)
+    # The comment translates to: "Save to parquet, utt2parquet_file, spk2parquet_file"
     df = pd.DataFrame()
     df['utt'] = utt_list
     df['wav'] = wav_list
@@ -88,8 +111,13 @@ if __name__ == "__main__":
     utt2speech_token = torch.load('{}/utt2speech_token.pt'.format(args.src_dir))
     utts = list(utt2wav.keys())
 
+    # Prepare arguments for worker initializer
+    initargs_tuple = (utt2wav, utt2text, utt2spk, utt2embedding, spk2embedding, utt2speech_token)
+
     # Using process pool to speedup
-    pool = multiprocessing.Pool(processes=args.num_processes)
+    pool = multiprocessing.Pool(processes=args.num_processes,
+                                initializer=init_worker,
+                                initargs=initargs_tuple)
     parquet_list, utt2parquet_list, spk2parquet_list = [], [], []
     for i, j in enumerate(range(0, len(utts), args.num_utts_per_parquet)):
         parquet_file = os.path.join(args.des_dir, 'parquet_{:09d}.tar'.format(i))
