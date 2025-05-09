@@ -75,13 +75,13 @@ if [ ${stage} -le 4 ] && [ ${stop_stage} -ge 4 ]; then
     python cosyvoice/bin/inference.py --mode $mode \
       --gpu 0 \
       --config conf/cosyvoice.yaml \
-      --prompt_data data/test-clean/parquet/data.list \
-      --prompt_utt2data data/test-clean/parquet/utt2data.list \
+      --prompt_data data/$processed_dev_data_name/parquet/data.list \
+      --prompt_utt2data data/$processed_dev_data_name/parquet/utt2data.list \
       --tts_text `pwd`/tts_text.json \
       --llm_model $pretrained_model_dir/llm.pt \
       --flow_model $pretrained_model_dir/flow.pt \
       --hifigan_model $pretrained_model_dir/hift.pt \
-      --result_dir `pwd`/exp/cosyvoice/test-clean/$mode
+      --result_dir `pwd`/exp/cosyvoice/$processed_dev_data_name/$mode
   done
 fi
 
