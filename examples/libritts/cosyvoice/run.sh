@@ -155,6 +155,9 @@ if [ ${stage} -le 7 ] && [ ${stop_stage} -ge 7 ]; then
   cp $finetuned_exp_dir_base/flow/$train_engine/flow.pt $finetuned_export_dir/flow.pt
   cp $finetuned_exp_dir_base/hifigan/$train_engine/hifigan.pt $finetuned_export_dir/hift.pt
   
+  echo "Copying configuration YAML to $finetuned_export_dir"
+  cp conf/cosyvoice.yaml $finetuned_export_dir/cosyvoice.yaml
+
   echo "Running JIT export using models from $finetuned_export_dir"
   python cosyvoice/bin/export_jit.py --model_dir $finetuned_export_dir
   echo "Running ONNX export using models from $finetuned_export_dir"
