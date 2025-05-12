@@ -153,12 +153,13 @@ if [ ${stage} -le 7 ] && [ ${stop_stage} -ge 7 ]; then
   echo "Copying fine-tuned models to $finetuned_export_dir"
   cp $finetuned_exp_dir_base/llm/$train_engine/llm.pt $finetuned_export_dir/llm.pt
   cp $finetuned_exp_dir_base/flow/$train_engine/flow.pt $finetuned_export_dir/flow.pt
-  cp $finetuned_exp_dir_base/hifigan/$train_engine/hifigan.pt $finetuned_export_dir/hift.pt
+  # cp $finetuned_exp_dir_base/hifigan/$train_engine/hifigan.pt $finetuned_export_dir/hift.pt
   
   echo "Copying configuration YAML to $finetuned_export_dir"
   cp conf/cosyvoice.yaml $finetuned_export_dir/cosyvoice.yaml
 
   echo "Copying auxiliary ONNX models and speaker info to $finetuned_export_dir"
+  cp $pretrained_model_dir/hift.pt $finetuned_export_dir/hift.pt
   cp $pretrained_model_dir/campplus.onnx $finetuned_export_dir/campplus.onnx
   cp $pretrained_model_dir/speech_tokenizer_v1.onnx $finetuned_export_dir/speech_tokenizer_v1.onnx
   cp $pretrained_model_dir/spk2info.pt $finetuned_export_dir/spk2info.pt || echo "Warning: spk2info.pt not found in pretrained model, not copied."
