@@ -103,7 +103,8 @@ if [ ${stage} -le 5 ] && [ ${stop_stage} -ge 5 ]; then
     checkpoint_to_load="$pretrained_model_dir/${actual_checkpoint_base_name}.pt"
 
     if [ ! -f "$checkpoint_to_load" ]; then
-      echo "WARNING: Pretrained checkpoint '$checkpoint_to_load' for model '$model' (using base name '$actual_checkpoint_base_name') does not exist! Training from scratch or default init."
+      echo "ERROR: Pretrained checkpoint '$checkpoint_to_load' for model '$model' (using base name '$actual_checkpoint_base_name') does not exist! Cannot continue."
+      exit 1 # Exit the script with an error code
     else
       echo "INFO: For model '$model', using checkpoint '$checkpoint_to_load'"
     fi
