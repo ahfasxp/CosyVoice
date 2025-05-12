@@ -15,7 +15,7 @@ processed_dev_data_name="myvoicespeaker_dev"
 # --- End Custom Configuration ---
 
 stage=0 # Defaulting to 0 as LibriTTS download stage is removed
-stop_stage=6
+stop_stage=7
 
 pretrained_model_dir=../../../pretrained_models/CosyVoice-300M
 
@@ -59,22 +59,22 @@ if [ ${stage} -le 3 ] && [ ${stop_stage} -ge 3 ]; then
   done
 fi
 
-# inference
-if [ ${stage} -le 4 ] && [ ${stop_stage} -ge 4 ]; then
-  echo "Run inference. Please make sure utt in tts_text is in prompt_data"
-  for mode in sft zero_shot; do
-    python cosyvoice/bin/inference.py --mode $mode \
-      --gpu 0 \
-      --config conf/cosyvoice.yaml \
-      --prompt_data data/$processed_dev_data_name/parquet/data.list \
-      --prompt_utt2data data/$processed_dev_data_name/parquet/utt2data.list \
-      --tts_text `pwd`/tts_text.json \
-      --llm_model $pretrained_model_dir/llm.pt \
-      --flow_model $pretrained_model_dir/flow.pt \
-      --hifigan_model $pretrained_model_dir/hift.pt \
-      --result_dir `pwd`/exp/cosyvoice/$processed_dev_data_name/$mode
-  done
-fi
+# # inference
+# if [ ${stage} -le 4 ] && [ ${stop_stage} -ge 4 ]; then
+#   echo "Run inference. Please make sure utt in tts_text is in prompt_data"
+#   for mode in sft zero_shot; do
+#     python cosyvoice/bin/inference.py --mode $mode \
+#       --gpu 0 \
+#       --config conf/cosyvoice.yaml \
+#       --prompt_data data/$processed_dev_data_name/parquet/data.list \
+#       --prompt_utt2data data/$processed_dev_data_name/parquet/utt2data.list \
+#       --tts_text `pwd`/tts_text.json \
+#       --llm_model $pretrained_model_dir/llm.pt \
+#       --flow_model $pretrained_model_dir/flow.pt \
+#       --hifigan_model $pretrained_model_dir/hift.pt \
+#       --result_dir `pwd`/exp/cosyvoice/$processed_dev_data_name/$mode
+#   done
+# fi
 
 # train llm
 export CUDA_VISIBLE_DEVICES="0"
