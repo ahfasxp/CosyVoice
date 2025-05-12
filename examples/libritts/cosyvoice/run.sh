@@ -161,7 +161,7 @@ if [ ${stage} -le 7 ] && [ ${stop_stage} -ge 7 ]; then
   echo "Copying auxiliary ONNX models and speaker info to $finetuned_export_dir"
   cp $pretrained_model_dir/campplus.onnx $finetuned_export_dir/campplus.onnx
   cp $pretrained_model_dir/speech_tokenizer_v1.onnx $finetuned_export_dir/speech_tokenizer_v1.onnx
-  cp $pretrained_model_dir/spk2info.pt $finetuned_export_dir/spk2info.pt
+  cp $pretrained_model_dir/spk2info.pt $finetuned_export_dir/spk2info.pt || echo "Warning: spk2info.pt not found in pretrained model, not copied."
 
   echo "Running JIT export using models from $finetuned_export_dir"
   python cosyvoice/bin/export_jit.py --model_dir $finetuned_export_dir
