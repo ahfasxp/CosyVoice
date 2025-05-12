@@ -92,6 +92,22 @@ if [ ${stage} -le 5 ] && [ ${stop_stage} -ge 5 ]; then
   cat data/$processed_train_data_name/parquet/data.list > data/train.data.list
   cat data/$processed_dev_data_name/parquet/data.list > data/dev.data.list
   for model in llm flow hifigan; do
+    # Determine the correct checkpoint file to load
+    actual_checkpoint_base_name=""
+    if [ "$model" == "hifigan" ]; then
+      actual_checkpoint_base_name="hift" # For 'hifigan' model, we want to load 'hift.pt'
+    else
+      actual_checkpoint_base_name="$model" # For 'llm' and 'flow', model name matches checkpoint base name
+    fi
+    
+    checkpoint_to_load="$pretrained_model_dir/${actual_checkpoint_base_name}.pt"
+
+    if [ ! -f "$checkpoint_to_load" ]; then
+      echo "WARNING: Pretrained checkpoint '$checkpoint_to_load' for model '$model' (using base name '$actual_checkpoint_base_name') does not exist! Training from scratch or default init."
+    else
+      echo "INFO: For model '$model', using checkpoint '$checkpoint_to_load'"
+    fi
+
     torchrun --nnodes=1 --nproc_per_node=$num_gpus \
         --rdzv_id=$job_id --rdzv_backend="c10d" --rdzv_endpoint="localhost:1234" \
       cosyvoice/bin/train.py \
@@ -100,7 +116,7 @@ if [ ${stage} -le 5 ] && [ ${stop_stage} -ge 5 ]; then
       --train_data data/train.data.list \
       --cv_data data/dev.data.list \
       --model $model \
-      --checkpoint $pretrained_model_dir/$model.pt \
+      --checkpoint "$checkpoint_to_load" \
       --model_dir `pwd`/exp/cosyvoice/$model/$train_engine \
       --tensorboard_dir `pwd`/tensorboard/cosyvoice/$model/$train_engine \
       --ddp.dist_backend $dist_backend \
