@@ -77,8 +77,8 @@ if [ ${stage} -le 4 ] && [ ${stop_stage} -ge 4 ]; then
 fi
 
 # train llm
-export CUDA_VISIBLE_DEVICES="0,1,2,3"
-num_gpus=$(echo $CUDA_VISIBLE_DEVICES | awk -F "," '{print NF}')
+export CUDA_VISIBLE_DEVICES="0"
+num_gpus=1
 job_id=1986
 dist_backend="nccl"
 num_workers=2
