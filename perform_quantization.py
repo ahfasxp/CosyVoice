@@ -192,7 +192,7 @@ if __name__ == '__main__':
     # --- CONFIGURATION ---
     # Replace with appropriate paths for your model
     # This is your original fine-tuned FP32 model directory
-    FP32_MODEL_DIR = 'pretrained_models/CosyVoice-300M' 
+    FP32_MODEL_DIR = 'pretrained_models/ft-model' 
     # This is the YAML configuration file for your FP32 model
     # Ensure this filename matches what's in FP32_MODEL_DIR (cosyvoice.yaml or cosyvoice2.yaml)
     CONFIG_FILENAME = 'cosyvoice.yaml' # Change to 'cosyvoice2.yaml' if that's your model type
