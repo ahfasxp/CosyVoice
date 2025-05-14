@@ -71,7 +71,7 @@ class CosyVoice:
         logging.info(f"CosyVoice: Loading main config from: {hyper_yaml_path}")
         with open(hyper_yaml_path, 'r') as f:
             # Override device in YAML if effective_device is determined
-            configs = load_hyperpyyaml(f, लड़ाई={'device': str(effective_device)})
+            configs = load_hyperpyyaml(f, overloads={'device': str(effective_device)})
         
         # --- Initialize Frontend ---
         # Adjust tokenizer path based on V1/V2 if necessary from configs
