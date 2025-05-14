@@ -181,20 +181,77 @@ if __name__ == '__main__':
                         default=8000)
     parser.add_argument('--model_dir',
                         type=str,
-                        default='pretrained_models/CosyVoice2-0.5B',
-                        help='local path or modelscope repo id')
+                        default='pretrained_models/CosyVoice-300M', # Default to a common FP32 model
+                        help='Local path to the model directory. For quantized models, point to the output of perform_quantization.py.')
+    parser.add_argument('--use_pre_quantized', action='store_true', 
+                        help='Load pre-quantized model objects for CPU inference. Model directory should contain quantized_*.pt files.')
+    parser.add_argument('--fp16', action='store_true', help='Enable FP16 inference (typically for GPU, ignored if --use_pre_quantized).')
+    parser.add_argument('--load_jit', action='store_true', help='Load JIT-traced models (ignored if --use_pre_quantized).')
+    parser.add_argument('--load_trt', action='store_true', help='Load TensorRT-optimized models (ignored if --use_pre_quantized).')
+    
     args = parser.parse_args()
+
+    model_directory = args.model_dir
+    use_quantized_flag = args.use_pre_quantized
+    fp16_flag = args.fp16
+    jit_flag = args.load_jit
+    trt_flag = args.load_trt
+
+    if use_quantized_flag:
+        logging.info("WebUI: Attempting to load pre-quantized model for CPU inference.")
+        fp16_flag = False 
+        jit_flag = False  
+        trt_flag = False  
+        # Set PyTorch quantized engine for best performance on CPU
+        # Ensure this is done before model loading if it affects how quantized ops are chosen
+        if torch.backends.quantized.engine == 'fbgemm' and not any(x86_cpu for x86_cpu in ['intel', 'amd', 'i386', 'i686', 'x86_64']):
+             logging.info("WebUI: fbgemm is default but may not be optimal for non-x86. Trying qnnpack.")
+             if 'qnnpack' in torch.backends.quantized.supported_engines:
+                 torch.backends.quantized.engine = 'qnnpack'
+        elif 'qnnpack' in torch.backends.quantized.supported_engines: # Default for ARM, good general fallback
+            torch.backends.quantized.engine = 'qnnpack'
+        elif 'fbgemm' in torch.backends.quantized.supported_engines: # Default for x86
+            torch.backends.quantized.engine = 'fbgemm'
+        else:
+            logging.warning("WebUI: Neither qnnpack nor fbgemm quantized engine found/supported. Performance may vary.")
+        logging.info(f"WebUI: Using PyTorch quantized engine: {torch.backends.quantized.engine}")
+
+
     try:
-        cosyvoice = CosyVoice(args.model_dir)
-    except Exception:
-        try:
-            cosyvoice = CosyVoice2(args.model_dir)
-        except Exception:
-            raise TypeError('no valid model_type!')
+        # Determine if the model_dir points to a CosyVoice2 model
+        # A simple heuristic is to check for 'cosyvoice2.yaml'
+        # More robustly, the perform_quantization.py script should copy the correct YAML.
+        is_cosyvoice2_model = os.path.exists(os.path.join(model_directory, 'cosyvoice2.yaml'))
+
+        if is_cosyvoice2_model:
+            logging.info(f"WebUI: Detected cosyvoice2.yaml in {model_directory}. Attempting to load as CosyVoice2.")
+            cosyvoice = CosyVoice2(
+                model_directory, 
+                load_jit=jit_flag, 
+                load_trt=trt_flag, 
+                fp16=fp16_flag, 
+                # use_flow_cache can be made a CLI arg if needed, True is a common default for CosyVoice2
+                use_flow_cache=True if not use_quantized_flag else False, # Flow cache might not be compatible with all quantization parts
+                use_pre_quantized=use_quantized_flag
+            )
+        else:
+            logging.info(f"WebUI: No cosyvoice2.yaml in {model_directory}. Attempting to load as CosyVoice (v1).")
+            cosyvoice = CosyVoice(
+                model_directory, 
+                load_jit=jit_flag, 
+                load_trt=trt_flag, 
+                fp16=fp16_flag, 
+                use_pre_quantized=use_quantized_flag
+            )
+        logging.info("WebUI: CosyVoice instance created successfully.")
+
+    except Exception as e:
+        logging.error(f"WebUI: Failed to initialize CosyVoice/CosyVoice2 from {model_directory}: {e}", exc_info=True)
+        raise TypeError(f'Could not initialize a valid CosyVoice model type from {model_directory}. Error: {e}')
 
     sft_spk = cosyvoice.list_available_spks()
     if len(sft_spk) == 0:
-        sft_spk = ['']
+        sft_spk = [''] # Default if no speakers available
     prompt_sr = 16000
-    default_data = np.zeros(cosyvoice.sample_rate)
+    default_data = np.zeros(cosyvoice.sample_rate, dtype=np.float32)
     main()

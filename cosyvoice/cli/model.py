@@ -72,8 +72,66 @@ class CosyVoiceModel:
         self.hift.load_state_dict(hift_state_dict, strict=True)
         self.hift.to(self.device).eval()
 
+    def load_fp32_state_dicts(self, llm_model_path, flow_model_path, hift_model_path):
+        """
+        Method to load standard FP32 state_dicts.
+        This is called by CosyVoice class if not using pre-quantized modules.
+        """
+        print(f"CosyVoiceModel: Loading FP32 state_dicts...")
+        self.llm.load_state_dict(torch.load(llm_model_path, map_location=self.device), strict=True)
+        print(f"  Loaded LLM state_dict from {llm_model_path}")
+        self.flow.load_state_dict(torch.load(flow_model_path, map_location=self.device), strict=True)
+        print(f"  Loaded Flow state_dict from {flow_model_path}")
+        
+        hift_state_dict_raw = torch.load(hift_model_path, map_location=self.device)
+        if any('generator.' in k for k in hift_state_dict_raw.keys()):
+            hift_state_dict = {k.replace('generator.', ''): v for k, v in hift_state_dict_raw.items()}
+        elif any('model.generator.' in k for k in hift_state_dict_raw.keys()):
+             hift_state_dict = {k.replace('model.generator.', ''): v for k, v in hift_state_dict_raw.items()}
+        else:
+            hift_state_dict = hift_state_dict_raw
+        self.hift.load_state_dict(hift_state_dict, strict=True)
+        print(f"  Loaded HiFT state_dict from {hift_model_path}")
+
+        self.llm.eval()
+        self.flow.eval()
+        self.hift.eval()
+        print("CosyVoiceModel: All FP32 state_dicts loaded and models set to eval.")
+
     def load_jit(self, llm_text_encoder_model, llm_llm_model, flow_encoder_model):
-        llm_text_encoder = torch.jit.load(llm_text_encoder_model, map_location=self.device)
+        # Check if parts are already quantized, JIT might be incompatible
+        if hasattr(self.llm, 'text_encoder') and (isinstance(self.llm.text_encoder, torch.jit.ScriptModule) or \
+           any(isinstance(m, (torch.ao.quantization.QuantizedLinear, torch.ao.quantization.LinearPackedParams)) for m in self.llm.text_encoder.modules())):
+            print("CosyVoiceModel: LLM text_encoder seems to be already JITted or quantized. Skipping JIT loading for it.")
+        elif hasattr(self.llm, 'text_encoder'):
+            llm_text_encoder = torch.jit.load(llm_text_encoder_model, map_location=self.device)
+            self.llm.text_encoder = llm_text_encoder
+        
+        if hasattr(self.llm, 'llm') and (isinstance(self.llm.llm, torch.jit.ScriptModule) or \
+           any(isinstance(m, (torch.ao.quantization.QuantizedLinear, torch.ao.quantization.LinearPackedParams)) for m in self.llm.llm.modules())):
+            print("CosyVoiceModel: LLM's internal llm module seems to be already JITted or quantized. Skipping JIT loading for it.")
+        elif hasattr(self.llm, 'llm'):
+            llm_llm_internal = torch.jit.load(llm_llm_model, map_location=self.device) # Renamed to avoid conflict
+            self.llm.llm = llm_llm_internal
+
+        if hasattr(self.flow, 'encoder') and (isinstance(self.flow.encoder, torch.jit.ScriptModule) or \
+           any(isinstance(m, (torch.ao.quantization.QuantizedLinear, torch.ao.quantization.LinearPackedParams)) for m in self.flow.encoder.modules())):
+            print("CosyVoiceModel: Flow encoder seems to be already JITted or quantized. Skipping JIT loading for it.")
+        elif hasattr(self.flow, 'encoder'):
+            flow_encoder = torch.jit.load(flow_encoder_model, map_location=self.device)
+            self.flow.encoder = flow_encoder
+        print("CosyVoiceModel: JIT models processed (loaded or skipped).")
+
+    def load_trt(self, flow_decoder_estimator_model, flow_decoder_onnx_model, fp16_trt): # Renamed fp16 to fp16_trt
+        if hasattr(self.flow.decoder, 'estimator_engine') and self.flow.decoder.estimator_engine is not None:
+            print("CosyVoiceModel: TensorRT engine for flow decoder estimator already loaded. Skipping.")
+            return
+        
+        # Check if estimator is suitable for TRT conversion (not quantized)
+        if hasattr(self.flow.decoder, 'estimator') and (not isinstance(self.flow.decoder.estimator, torch.nn.Module) or \
+            any(isinstance(m, (torch.ao.quantization.QuantizedLinear, torch.ao.quantization.LinearPackedParams)) for m in self.flow.decoder.estimator.modules())):
+            print("CosyVoiceModel: Flow decoder estimator is not a standard nn.Module or is quantized. Skipping TRT loading.")
+            return
         self.llm.text_encoder = llm_text_encoder
         llm_llm = torch.jit.load(llm_llm_model, map_location=self.device)
         self.llm.llm = llm_llm
@@ -241,19 +299,31 @@ class CosyVoice2Model(CosyVoiceModel):
                  flow: torch.nn.Module,
                  hift: torch.nn.Module,
                  fp16: bool = False,
-                 use_flow_cache: bool = False):
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.llm = llm
-        self.flow = flow
-        self.hift = hift
-        self.fp16 = fp16
+                 use_flow_cache: bool = False): # quantize_cpu flag removed
+        super().__init__(llm, flow, hift, fp16=fp16) # Pass to parent
         self.use_flow_cache = use_flow_cache
-        if self.fp16 is True:
-            self.llm.half()
-            self.flow.half()
-        # stream related params, check examples/libritts/cosyvoice2/conf/cosyvoice2.yaml
-        self.token_hop_len = 25
-        self.flow_decoder_required_cache_size = 0 if use_flow_cache is False else 1 * self.token_hop_len * self.flow.token_mel_ratio
+        
+        # Ensure device is consistent with parent, especially if parent forced CPU for quantization
+        # self.device is already set by super().__init__
+
+        # FP16 handling is now primarily in the parent's __init__.
+        # If super().__init__ set self.fp16 = False (e.g. on CPU), that will be respected.
+        
+        # stream related params
+        # These might need to come from config if they vary per CosyVoice2 model
+        self.token_hop_len = 25 
+        self.flow_decoder_required_cache_size = 0
+        if hasattr(self.flow, 'token_mel_ratio') and self.flow.token_mel_ratio is not None:
+             self.flow_decoder_required_cache_size = 0 if not self.use_flow_cache else self.token_hop_len * self.flow.token_mel_ratio
+        else:
+            # This can happen if flow is a pre-quantized loaded object that didn't get this attr from YAML
+            # Or if the flow module class itself doesn't define it.
+            # Defaulting or raising an error might be options. For now, a warning.
+            if self.use_flow_cache:
+                 print(f"Warning: CosyVoice2Model: flow module (type: {type(self.flow)}) does not have 'token_mel_ratio' attribute or it's None. "
+                       f"flow_decoder_required_cache_size may be incorrect for flow_cache mode.")
+                 # Fallback or default if necessary, e.g. from a typical config value if known
+                 # self.flow_decoder_required_cache_size = self.token_hop_len * 2 # Example fallback
         # hift cache
         self.mel_cache_len = 8
         self.source_cache_len = int(self.mel_cache_len * 480)
