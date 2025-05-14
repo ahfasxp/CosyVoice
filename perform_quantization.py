@@ -209,22 +209,4 @@ if __name__ == '__main__':
         sys.exit(1)
 
     quantize_and_save_submodules(CONFIG_FILE, FP32_MODEL_DIR, QUANTIZED_OUTPUT_DIR)
-```
-
-**Changes to `cosyvoice/cli/model.py`:**
-
-```python
-cosyvoice/cli/model.py
-<<<<<<< SEARCH
-                 llm: torch.nn.Module,
-                 flow: torch.nn.Module,
-                 hift: torch.nn.Module,
-                 fp16: bool = False):
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.llm = llm
-        self.flow = flow
-        self.hift = hift
-        self.fp16 = fp16
-        if self.fp16 is True:
-            self.llm.half()
             self.flow.half()

@@ -132,13 +132,15 @@ class CosyVoiceModel:
             any(isinstance(m, (torch.ao.quantization.QuantizedLinear, torch.ao.quantization.LinearPackedParams)) for m in self.flow.decoder.estimator.modules())):
             print("CosyVoiceModel: Flow decoder estimator is not a standard nn.Module or is quantized. Skipping TRT loading.")
             return
-        self.llm.text_encoder = llm_text_encoder
-        llm_llm = torch.jit.load(llm_llm_model, map_location=self.device)
-        self.llm.llm = llm_llm
-        flow_encoder = torch.jit.load(flow_encoder_model, map_location=self.device)
-        self.flow.encoder = flow_encoder
+        # The following lines were erroneously copied here from load_jit and should be removed.
+        # self.llm.text_encoder = llm_text_encoder
+        # llm_llm = torch.jit.load(llm_llm_model, map_location=self.device)
+        # self.llm.llm = llm_llm
+        # flow_encoder = torch.jit.load(flow_encoder_model, map_location=self.device)
+        # self.flow.encoder = flow_encoder
+        # End of erroneous lines
 
-    def load_trt(self, flow_decoder_estimator_model, flow_decoder_onnx_model, fp16):
+    def load_trt(self, flow_decoder_estimator_model, flow_decoder_onnx_model, fp16): # This is the correct start of the second load_trt
         assert torch.cuda.is_available(), 'tensorrt only supports gpu!'
         if not os.path.exists(flow_decoder_estimator_model):
             convert_onnx_to_trt(flow_decoder_estimator_model, self.get_trt_kwargs(), flow_decoder_onnx_model, fp16)

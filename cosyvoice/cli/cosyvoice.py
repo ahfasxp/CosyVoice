@@ -164,7 +164,6 @@ class CosyVoice:
         
         del configs # Clean up configs
         logging.info("CosyVoice: Initialization complete.")
-        del configs
 
     def list_available_spks(self):
         spks = list(self.frontend.spk2info.keys())
