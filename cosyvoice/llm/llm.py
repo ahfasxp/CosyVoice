@@ -148,13 +148,67 @@ class TransformerLM(torch.nn.Module):
             ignore_eos: bool = True,
     ):
         num_trials, max_trials = 0, 100
+        original_weighted_scores = weighted_scores # Keep original scores
+
         while True:
-            top_ids = self.sampling(weighted_scores, decoded_tokens, sampling)
-            if (not ignore_eos) or (self.speech_token_size not in top_ids):
+            current_scores_to_sample = original_weighted_scores
+            # If we are re-trying BECAUSE EOS was picked while ignored,
+            # and this is not the first trial, then suppress EOS.
+            if ignore_eos and num_trials > 0: 
+                suppressed_scores = original_weighted_scores.clone()
+                # For TransformerLM, EOS is self.speech_token_size
+                # For Qwen2LM, EOS is also self.speech_token_size (index for speech_token_size + 3 vocab)
+                eos_token_index = self.speech_token_size 
+                
+                if 0 <= eos_token_index < suppressed_scores.size(-1):
+                    suppressed_scores[..., eos_token_index] = -float('inf') # Suppress by setting logp to negative infinity
+                    current_scores_to_sample = suppressed_scores
+                else:
+                    # This should not happen if speech_token_size is valid
+                    logging.warning(f"EOS token index {eos_token_index} is out of bounds for scores tensor size {suppressed_scores.size(-1)}. Cannot suppress EOS.")
+
+            top_ids = self.sampling(current_scores_to_sample, decoded_tokens, sampling)
+            
+            # Check if the selected token is EOS
+            is_eos_selected = False
+            if isinstance(top_ids, torch.Tensor): # top_ids can be a tensor
+                is_eos_selected = (top_ids == self.speech_token_size).any().item()
+            elif isinstance(top_ids, int): # Or an int
+                is_eos_selected = (top_ids == self.speech_token_size)
+
+            # Conditions to exit the loop:
+            # 1. ignore_eos is False (EOS is allowed)
+            # 2. ignore_eos is True, BUT the selected token is NOT EOS
+            if not (ignore_eos and is_eos_selected):
                 break
+
             num_trials += 1
-            if num_trials > max_trials:
-                raise RuntimeError('sampling reaches max_trials {} and still get eos when ignore_eos is True, check your input!'.format(max_trials))
+            if num_trials >= max_trials: # Use >= to break after max_trials attempts
+                logging.error(f"Sampling reached max_trials ({max_trials}) and still got EOS when ignore_eos=True. Original scores for EOS: {original_weighted_scores[..., self.speech_token_size] if 0 <= self.speech_token_size < original_weighted_scores.size(-1) else 'N/A'}")
+                # Fallback: if stuck, pick the top non-EOS token from the original scores
+                fallback_scores = original_weighted_scores.clone()
+                if 0 <= self.speech_token_size < fallback_scores.size(-1):
+                    fallback_scores[..., self.speech_token_size] = -float('inf') # Permanently ignore EOS for this step
+                
+                if fallback_scores.numel() > 0 and fallback_scores.size(-1) > 0 : # Ensure tensor is not empty and has a last dimension
+                    # Select top-1 from the modified scores (EOS suppressed)
+                    # This will be the non-EOS token with the highest probability
+                    try:
+                        top_ids = torch.topk(fallback_scores, 1).indices.item()
+                        logging.warning(f"Fallback: Chose token {top_ids} after suppressing EOS.")
+                    except Exception as e_topk:
+                        logging.error(f"Fallback topk failed: {e_topk}. Trying random choice from valid indices.")
+                        valid_indices = [idx for idx in range(fallback_scores.size(-1)) if idx != self.speech_token_size]
+                        if valid_indices:
+                            top_ids = random.choice(valid_indices)
+                            logging.warning(f"Fallback emergency: Chose random token {top_ids}.")
+                        else:
+                             raise RuntimeError('Fallback sampling failed completely: No candidates after suppressing EOS and vocab is too small or empty.')
+                else: 
+                     logging.error("Fallback sampling failed: weighted_scores became empty or invalid after suppressing EOS.")
+                     # As an absolute last resort, if vocab is just EOS, this is unrecoverable with ignore_eos=True
+                     raise RuntimeError('Fallback sampling failed: weighted_scores invalid or vocab too small.')
+                break # Exit loop after fallback
         return top_ids
 
     @torch.inference_mode()
@@ -197,8 +251,22 @@ class TransformerLM(torch.nn.Module):
         lm_input = torch.concat([sos_eos_emb, embedding, text, task_id_emb, prompt_speech_token_emb], dim=1)
 
         # 4. cal min/max_length
-        min_len = int((text_len - prompt_text_len) * min_token_text_ratio)
-        max_len = int((text_len - prompt_text_len) * max_token_text_ratio)
+        # Ensure text_len and prompt_text_len are scalars before arithmetic operations
+        current_text_len = text_len.item() if isinstance(text_len, torch.Tensor) and text_len.numel() == 1 else text_len
+        current_prompt_text_len = prompt_text_len.item() if isinstance(prompt_text_len, torch.Tensor) and prompt_text_len.numel() == 1 else prompt_text_len
+
+        actual_text_len_to_synth = current_text_len - current_prompt_text_len
+        
+        if actual_text_len_to_synth <= 0: 
+            max_len = 0 # Nothing to generate if no new text
+            min_len = 0
+        else:
+            min_len = int(actual_text_len_to_synth * min_token_text_ratio)
+            max_len = int(actual_text_len_to_synth * max_token_text_ratio)
+            # Ensure min_len is at least 1 if we are generating, and not more than max_len
+            if max_len > 0:
+                min_len = max(1, min_len)
+            min_len = min(min_len, max_len) # min_len should not exceed max_len
 
         # 5. step by step decode
         out_tokens = []
@@ -398,8 +466,20 @@ class Qwen2LM(TransformerLM):
         lm_input = torch.concat([sos_eos_emb, text, task_id_emb, prompt_speech_token_emb], dim=1)
 
         # 4. cal min/max_length
-        min_len = int((text_len - prompt_text_len) * min_token_text_ratio)
-        max_len = int((text_len - prompt_text_len) * max_token_text_ratio)
+        current_text_len = text_len.item() if isinstance(text_len, torch.Tensor) and text_len.numel() == 1 else text_len
+        current_prompt_text_len = prompt_text_len.item() if isinstance(prompt_text_len, torch.Tensor) and prompt_text_len.numel() == 1 else prompt_text_len
+
+        actual_text_len_to_synth = current_text_len - current_prompt_text_len
+
+        if actual_text_len_to_synth <= 0:
+            max_len = 0
+            min_len = 0
+        else:
+            min_len = int(actual_text_len_to_synth * min_token_text_ratio)
+            max_len = int(actual_text_len_to_synth * max_token_text_ratio)
+            if max_len > 0:
+                min_len = max(1, min_len)
+            min_len = min(min_len, max_len)
 
         # 5. step by step decode
         out_tokens = []
