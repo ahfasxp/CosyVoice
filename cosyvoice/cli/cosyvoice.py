@@ -93,33 +93,64 @@ class CosyVoice:
         # --- Initialize or Load Model Modules ---
         if self.use_pre_quantized:
             logging.info("CosyVoice: Loading pre-quantized model objects for CPU inference...")
-            # Paths for pre-quantized module objects
-            quantized_llm_module_path = os.path.join(model_dir_abs, 'quantized_llm_module.pt')
-            quantized_flow_module_path = os.path.join(model_dir_abs, 'quantized_flow_module.pt')
-            hift_module_object_path = os.path.join(model_dir_abs, 'hift_module.pt') # HiFT is FP32 object
+            logging.info("CosyVoice: Loading pre-quantized model state_dicts for CPU inference...")
+            # Paths for pre-quantized state_dicts
+            quantized_llm_state_dict_path = os.path.join(model_dir_abs, 'quantized_llm_state_dict.pt')
+            quantized_flow_state_dict_path = os.path.join(model_dir_abs, 'quantized_flow_state_dict.pt')
+            hift_state_dict_path = os.path.join(model_dir_abs, 'hift_state_dict.pt') 
 
-            if not os.path.exists(quantized_llm_module_path):
-                raise FileNotFoundError(f"Quantized LLM module not found: {quantized_llm_module_path}")
-            if not os.path.exists(quantized_flow_module_path):
-                raise FileNotFoundError(f"Quantized Flow module not found: {quantized_flow_module_path}")
-            if not os.path.exists(hift_module_object_path):
-                raise FileNotFoundError(f"HiFT module object not found: {hift_module_object_path}")
+            if not os.path.exists(quantized_llm_state_dict_path):
+                raise FileNotFoundError(f"Quantized LLM state_dict not found: {quantized_llm_state_dict_path}")
+            if not os.path.exists(quantized_flow_state_dict_path):
+                raise FileNotFoundError(f"Quantized Flow state_dict not found: {quantized_flow_state_dict_path}")
+            if not os.path.exists(hift_state_dict_path):
+                raise FileNotFoundError(f"HiFT state_dict not found: {hift_state_dict_path}")
 
-            loaded_llm = torch.load(quantized_llm_module_path, map_location=effective_device)
-            logging.info(f"  Loaded quantized LLM from {quantized_llm_module_path}")
-            loaded_flow = torch.load(quantized_flow_module_path, map_location=effective_device)
-            logging.info(f"  Loaded (partially) quantized Flow from {quantized_flow_module_path}")
-            loaded_hift = torch.load(hift_module_object_path, map_location=effective_device)
-            logging.info(f"  Loaded HiFT (FP32 object) from {hift_module_object_path}")
+            # 1. Initialize module shells from YAML config (these are FP32 initially)
+            logging.info("  Initializing module shells from YAML config...")
+            llm_shell = configs['llm']
+            flow_shell = configs['flow']
+            hift_shell = configs['hift']
+
+            # 2. Prepare shells for quantized state_dict loading by applying dynamic quantization
+            #    This modifies the architecture (e.g., nn.Linear -> QuantizedLinear)
+            logging.info("  Applying dynamic quantization to LLM and Flow shells...")
+            llm_shell.to(effective_device).eval()
+            if hasattr(llm_shell, 'text_encoder') and isinstance(llm_shell.text_encoder, torch.nn.Module):
+                llm_shell.text_encoder = torch.quantization.quantize_dynamic(llm_shell.text_encoder.eval(), {torch.nn.Linear}, dtype=torch.qint8)
+            if hasattr(llm_shell, 'llm') and isinstance(llm_shell.llm, torch.nn.Module): # Internal 'llm' attribute
+                llm_shell.llm = torch.quantization.quantize_dynamic(llm_shell.llm.eval(), {torch.nn.Linear}, dtype=torch.qint8)
             
-            # Initialize CosyVoiceModel with these pre-loaded, pre-configured modules
-            self.model = CosyVoiceModel(llm=loaded_llm, flow=loaded_flow, hift=loaded_hift, fp16=False) # fp16 is False for quantized
-            # Ensure device consistency (CosyVoiceModel __init__ also does this)
-            self.model.device = effective_device 
-            self.model.llm.to(effective_device)
-            self.model.flow.to(effective_device)
-            self.model.hift.to(effective_device)
-            logging.info("CosyVoice: CosyVoiceModel initialized with pre-quantized modules on CPU.")
+            flow_shell.to(effective_device).eval()
+            if hasattr(flow_shell, 'encoder') and isinstance(flow_shell.encoder, torch.nn.Module):
+                flow_shell.encoder = torch.quantization.quantize_dynamic(flow_shell.encoder.eval(), {torch.nn.Linear}, dtype=torch.qint8)
+            if hasattr(flow_shell, 'decoder') and hasattr(flow_shell.decoder, 'estimator') and \
+               isinstance(flow_shell.decoder.estimator, torch.nn.Module):
+                flow_shell.decoder.estimator = torch.quantization.quantize_dynamic(flow_shell.decoder.estimator.eval(), {torch.nn.Linear}, dtype=torch.qint8)
+
+            hift_shell.to(effective_device).eval() # HiFT remains FP32, just ensure it's on device and eval
+
+            # 3. Load the (quantized) state_dicts into the prepared shells
+            logging.info("  Loading state_dicts into prepared shells...")
+            llm_shell.load_state_dict(torch.load(quantized_llm_state_dict_path, map_location=effective_device))
+            logging.info(f"    Loaded quantized LLM state_dict from {quantized_llm_state_dict_path}")
+            
+            flow_shell.load_state_dict(torch.load(quantized_flow_state_dict_path, map_location=effective_device))
+            logging.info(f"    Loaded quantized Flow state_dict from {quantized_flow_state_dict_path}")
+            
+            # Load HiFT FP32 state_dict
+            hift_sd_raw = torch.load(hift_state_dict_path, map_location=effective_device)
+            if any('generator.' in k for k in hift_sd_raw.keys()): 
+                hift_sd_clean = {k.replace('generator.', ''): v for k, v in hift_sd_raw.items()}
+            else:
+                hift_sd_clean = hift_sd_raw
+            hift_shell.load_state_dict(hift_sd_clean)
+            logging.info(f"    Loaded HiFT state_dict from {hift_state_dict_path}")
+            
+            # Initialize CosyVoiceModel with these now prepared modules
+            self.model = CosyVoiceModel(llm=llm_shell, flow=flow_shell, hift=hift_shell, fp16=False) # fp16 is False for quantized
+            self.model.device = effective_device # Ensure device is set in the model instance
+            logging.info("CosyVoice: CosyVoiceModel initialized with pre-quantized state_dicts on CPU.")
 
         else: # Standard FP32 loading path
             logging.info("CosyVoice: Initializing models from config and loading FP32 state_dicts...")

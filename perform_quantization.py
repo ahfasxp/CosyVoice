@@ -107,16 +107,17 @@ def quantize_and_save_submodules(config_path, fp32_model_dir, output_quantized_d
         llm_to_quantize.llm = quantized_internal_llm # Replace with quantized version
         print("  LLM's internal llm module quantized.")
     
-    # Save the entire LLM module object, which now contains quantized parts
-    quantized_llm_module_path = os.path.join(output_quantized_dir, 'quantized_llm_module.pt')
-    torch.save(llm_to_quantize, quantized_llm_module_path)
-    print(f"Quantized LLM module (object) saved to {quantized_llm_module_path}")
+    # Save the state_dict of the LLM module, which now contains quantized parts
+    quantized_llm_state_dict_path = os.path.join(output_quantized_dir, 'quantized_llm_state_dict.pt')
+    torch.save(llm_to_quantize.state_dict(), quantized_llm_state_dict_path)
+    print(f"Quantized LLM module (state_dict) saved to {quantized_llm_state_dict_path}")
 
     # --- Quantize Flow (Encoder and Decoder Estimator) ---
     print("\nQuantizing Flow module parts...")
     flow_to_modify = flow_fp32 # This is the MaskedDiffWithXvec instance
     flow_to_modify.eval()
 
+    # Sub-modules are quantized in-place within the flow_to_modify object
     if hasattr(flow_to_modify, 'encoder') and isinstance(flow_to_modify.encoder, torch.nn.Module):
         print("  Quantizing Flow's encoder...")
         flow_to_modify.encoder.eval()
@@ -137,18 +138,18 @@ def quantize_and_save_submodules(config_path, fp32_model_dir, output_quantized_d
         flow_to_modify.decoder.estimator = quantized_flow_decoder_estimator # Replace
         print("  Flow's decoder estimator quantized.")
     
-    # Save the entire Flow module object, which now contains quantized parts
-    # Other parts (e.g., length_regulator) remain FP32 with their loaded weights.
-    quantized_flow_module_path = os.path.join(output_quantized_dir, 'quantized_flow_module.pt')
-    torch.save(flow_to_modify, quantized_flow_module_path)
-    print(f"Modified Flow module (object with quantized parts) saved to {quantized_flow_module_path}")
+    # Save the state_dict of the modified Flow module.
+    # This state_dict will contain _packed_params for the quantized sub-layers.
+    quantized_flow_state_dict_path = os.path.join(output_quantized_dir, 'quantized_flow_state_dict.pt')
+    torch.save(flow_to_modify.state_dict(), quantized_flow_state_dict_path)
+    print(f"Modified Flow module (state_dict with quantized parts) saved to {quantized_flow_state_dict_path}")
     
-    # --- HiFT (Not dynamically quantized, save FP32 module object) ---
-    print("\nSaving HiFT module (as FP32 object)...")
+    # --- HiFT (Not dynamically quantized, save FP32 state_dict) ---
+    print("\nSaving HiFT module (as FP32 state_dict)...")
     # hift_fp32 already has its state_dict loaded
-    hift_module_object_path = os.path.join(output_quantized_dir, 'hift_module.pt')
-    torch.save(hift_fp32, hift_module_object_path)
-    print(f"HiFT module (FP32 object) saved to {hift_module_object_path}")
+    hift_state_dict_path = os.path.join(output_quantized_dir, 'hift_state_dict.pt')
+    torch.save(hift_fp32.state_dict(), hift_state_dict_path)
+    print(f"HiFT module (FP32 state_dict) saved to {hift_state_dict_path}")
 
     # --- Copy configuration and other supporting files ---
     print("\nCopying supporting files...")
