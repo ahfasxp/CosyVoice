@@ -43,9 +43,9 @@ def quantize_and_save_submodules(config_path, fp32_model_dir, output_quantized_d
 
     # 1. Load configuration
     print("Loading YAML configuration...")
-    # Ensure device in config is also CPU if it's used for module initialization from YAML
+    # Device is handled explicitly in this script, no need to override in YAML load for quantization.
     with open(config_path, 'r') as f:
-        configs = load_hyperpyyaml(f, {'device': 'cpu'}) 
+        configs = load_hyperpyyaml(f) # Remove the override dictionary
     print("YAML configuration loaded.")
 
     # Initialize FP32 modules from configuration
