@@ -209,4 +209,3 @@ if __name__ == '__main__':
         sys.exit(1)
 
     quantize_and_save_submodules(CONFIG_FILE, FP32_MODEL_DIR, QUANTIZED_OUTPUT_DIR)
-            self.flow.half()
